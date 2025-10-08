@@ -1,6 +1,5 @@
 import streamlit as st
 import os
-from google.cloud import speech
 from google import genai
 from google.genai import types
 
@@ -19,7 +18,7 @@ with st.sidebar:
 # The user uploads an audio file. We specify the types of audio files we accept.
 uploaded_file = st.file_uploader(
     "Upload your audio file (e.g., .mp3, .wav, .m4a)",
-    type=["mp3", "mp4", "mpeg", "mpga", "m4a", "wav", "webm"]
+    type=["mp3", "mp4", "mpeg", "mpga", "m4a", "wav", "webm", "aac"]
 )
 
 # --- 2. PSEUDO CODE EXPLANATION (and Implementation) ---
@@ -32,42 +31,45 @@ if gemini_api_key and uploaded_file is not None:
     # IMPORTANT: Using google-genai SDK as per python_gemini integration
     gemini_client = genai.Client(api_key=gemini_api_key)
     
-    # STEP 1: Transcribe the audio file using Google Speech-to-Text.
+    # STEP 1: Transcribe the audio file using Gemini's audio capabilities.
+    # Gemini 2.5 can directly process audio files for transcription!
     # We show a spinner to let the user know something is happening.
     with st.spinner("Transcribing audio... this might take a moment ⏳"):
         try:
-            # Google Speech-to-Text can handle audio directly from Streamlit's uploaded file
-            # We read the audio file content
-            audio_content = uploaded_file.read()
+            # Read the audio file content
+            audio_bytes = uploaded_file.read()
             
-            # Initialize Speech-to-Text client
-            speech_client = speech.SpeechClient()
+            # Determine MIME type based on file extension
+            file_extension = uploaded_file.name.split('.')[-1].lower()
+            mime_type_map = {
+                'mp3': 'audio/mp3',
+                'mpeg': 'audio/mpeg',
+                'mpga': 'audio/mpeg',
+                'mp4': 'audio/mp4',
+                'm4a': 'audio/mp4',
+                'wav': 'audio/wav',
+                'webm': 'audio/webm',
+                'aac': 'audio/aac'
+            }
+            mime_type = mime_type_map.get(file_extension, 'audio/mpeg')
             
-            # Configure the audio
-            audio = speech.RecognitionAudio(content=audio_content)
-            
-            # Configure recognition settings
-            # Using automatic encoding detection and common settings
-            config = speech.RecognitionConfig(
-                encoding=speech.RecognitionConfig.AudioEncoding.ENCODING_UNSPECIFIED,
-                language_code="en-US",
-                enable_automatic_punctuation=True,
-                audio_channel_count=1,
+            # Use Gemini to transcribe the audio
+            # IMPORTANT: Using gemini-2.5-flash as per the integration guidelines
+            transcription_response = gemini_client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=[
+                    "Please transcribe this audio file accurately. Provide the complete transcript with proper punctuation.",
+                    types.Part.from_bytes(
+                        data=audio_bytes,
+                        mime_type=mime_type
+                    )
+                ]
             )
             
-            # Call the Speech-to-Text API
-            response = speech_client.recognize(config=config, audio=audio)
-            
-            # Extract the transcript text from the response
-            transcript_text = ""
-            for result in response.results:
-                transcript_text += result.alternatives[0].transcript + " "
-            
-            transcript_text = transcript_text.strip()
+            transcript_text = transcription_response.text.strip()
             
         except Exception as e:
             st.error(f"Error during transcription: {e}")
-            st.info("Note: Google Speech-to-Text requires proper audio format. Try using WAV, FLAC, or properly encoded MP3 files.")
             transcript_text = ""
 
     # IF the transcription was successful (we got some text back):
